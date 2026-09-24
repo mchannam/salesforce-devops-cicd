@@ -1,0 +1,161 @@
+name: Reusable Salesforce Validate or Deploy
+
+on:
+  workflow_call:
+    inputs:
+      github_environment:
+        description: GitHub Environment containing SF_AUTH_URL
+        required: true
+        type: string
+      from_ref:
+        description: Base Git ref/SHA for delta
+        required: true
+        type: string
+      to_ref:
+        description: Target Git ref/SHA for delta
+        required: true
+        type: string
+      operation:
+        description: validate-lower, validate-production, or deploy
+        required: true
+        type: string
+      test_level:
+        description: Salesforce Apex test level
+        required: false
+        default: RunLocalTests
+        type: string
+
+jobs:
+  salesforce:
+    name: Salesforce ${{ inputs.operation }}
+    runs-on: ubuntu-latest
+
+    # Dynamic GitHub Environment allows single-team and per-team credentials.
+    environment: ${{ inputs.github_environment }}
+
+    concurrency:
+      group: sf-${{ inputs.github_environment }}
+      cancel-in-progress: false
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up Java for PMD engine
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Salesforce CLI
+        shell: bash
+        run: npm install --global @salesforce/cli
+
+      - name: Scan repository for credential patterns
+        shell: bash
+        run: python scripts/ci/scan_for_secrets.py .
+
+      - name: Run Salesforce Code Analyzer / PMD
+        shell: bash
+        run: |
+          mkdir -p reports
+          sf code-analyzer run \
+            --workspace . \
+            --target "force-app/**/*.cls" \
+            --rule-selector pmd \
+            --severity-threshold High \
+            --output-file reports/code-analyzer.xml
+
+      - name: Authenticate target Salesforce org
+        shell: bash
+        env:
+          SF_AUTH_URL: ${{ secrets.SF_AUTH_URL }}
+        run: bash scripts/ci/auth_org.sh ci-target
+
+      - name: Normalize delta baseline
+        id: baseline
+        shell: bash
+        run: |
+          NORMALIZED_FROM="$(python scripts/ci/normalize_base.py '${{ inputs.from_ref }}' '${{ inputs.to_ref }}')"
+          echo "from_ref=$NORMALIZED_FROM" >> "$GITHUB_OUTPUT"
+
+      - name: Generate delta package
+        shell: bash
+        run: |
+          bash scripts/ci/generate_delta.sh \
+            "${{ steps.baseline.outputs.from_ref }}" \
+            "${{ inputs.to_ref }}"
+
+      - name: Detect Salesforce metadata changes
+        id: delta
+        shell: bash
+        run: |
+          python scripts/ci/has_changes.py delta | tee /tmp/delta-status.txt
+          cat /tmp/delta-status.txt >> "$GITHUB_OUTPUT"
+
+      - name: Lower environment dry-run
+        if: steps.delta.outputs.has_changes == 'true' && inputs.operation == 'validate-lower'
+        shell: bash
+        run: |
+          mkdir -p reports
+          sf project deploy start \
+            --dry-run \
+            --manifest delta/package/package.xml \
+            --post-destructive-changes delta/destructiveChanges/destructiveChanges.xml \
+            --target-org ci-target \
+            --test-level "${{ inputs.test_level }}" \
+            --wait 60 \
+            --json | tee reports/deployment.json
+
+      - name: Production validation
+        if: steps.delta.outputs.has_changes == 'true' && inputs.operation == 'validate-production'
+        shell: bash
+        run: |
+          mkdir -p reports
+          sf project deploy validate \
+            --manifest delta/package/package.xml \
+            --post-destructive-changes delta/destructiveChanges/destructiveChanges.xml \
+            --target-org ci-target \
+            --test-level "${{ inputs.test_level }}" \
+            --wait 60 \
+            --json | tee reports/deployment.json
+
+      - name: Deploy delta
+        if: steps.delta.outputs.has_changes == 'true' && inputs.operation == 'deploy'
+        shell: bash
+        run: |
+          mkdir -p reports
+          sf project deploy start \
+            --manifest delta/package/package.xml \
+            --post-destructive-changes delta/destructiveChanges/destructiveChanges.xml \
+            --target-org ci-target \
+            --test-level "${{ inputs.test_level }}" \
+            --wait 60 \
+            --json | tee reports/deployment.json
+
+      - name: No Salesforce metadata changes
+        if: steps.delta.outputs.has_changes != 'true'
+        shell: bash
+        run: echo "No deployable Salesforce metadata changes detected."
+
+      - name: Upload CI reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: salesforce-${{ inputs.github_environment }}-${{ github.run_id }}
+          path: |
+            reports/
+            delta/package/package.xml
+            delta/destructiveChanges/destructiveChanges.xml
+          if-no-files-found: ignore
+          retention-days: 14

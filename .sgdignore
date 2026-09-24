@@ -1,0 +1,9 @@
+# Ignore repository-only files when generating Salesforce deployment deltas
+.github/**
+docs/**
+scripts/**
+README.md
+LICENSE
+package.json
+package-lock.json
+code-analyzer.yml

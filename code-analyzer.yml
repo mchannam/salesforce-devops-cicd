@@ -1,0 +1,7 @@
+# Generic Salesforce Code Analyzer configuration.
+# The workflow executes the PMD engine and fails at High severity.
+# Add or tune rule overrides for your own project only after review.
+
+engines:
+  pmd:
+    disable_engine: false

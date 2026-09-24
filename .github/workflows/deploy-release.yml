@@ -1,0 +1,33 @@
+name: Deploy Release / Staging
+
+on:
+  push:
+    branches:
+      - "release/**"
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      github_environment: ${{ steps.env.outputs.github_environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: env
+        shell: bash
+        run: |
+          python scripts/ci/resolve_environment.py "${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    if: github.event.created == false
+    needs: resolve
+    uses: ./.github/workflows/_salesforce-deploy.yml
+    with:
+      github_environment: ${{ needs.resolve.outputs.github_environment }}
+      from_ref: ${{ github.event.before }}
+      to_ref: ${{ github.sha }}
+      operation: deploy
+      test_level: RunLocalTests
+    secrets: inherit

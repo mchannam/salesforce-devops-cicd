@@ -1,0 +1,13 @@
+{
+  "name": "salesforce-devops-reference-pipeline",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Generic Salesforce DevOps reference pipeline using GitHub Actions.",
+  "scripts": {
+    "scan:secrets": "python scripts/ci/scan_for_secrets.py .",
+    "check:branch": "python scripts/ci/validate_branch_flow.py"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

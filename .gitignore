@@ -1,0 +1,40 @@
+# Salesforce
+.sfdx/
+.sf/
+.localdevserver/
+.localdevserver/
+
+# Authentication / certificates
+*.key
+*.pem
+*.crt
+*.p12
+*.jks
+authFile.json
+sfdx-auth-url.txt
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Generated CI output
+delta/
+reports/
+artifacts/
+coverage/
+test-results/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# IDE / OS
+.vscode/settings.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc

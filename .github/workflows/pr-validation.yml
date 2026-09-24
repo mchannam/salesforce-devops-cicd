@@ -1,0 +1,62 @@
+name: PR Policy and Salesforce Validation
+
+on:
+  pull_request:
+    branches:
+      - main
+      - dev
+      - "dev/**"
+      - uat
+      - "uat/**"
+      - "release/**"
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  branch-policy:
+    name: Branch promotion policy
+    runs-on: ubuntu-latest
+    outputs:
+      github_environment: ${{ steps.resolve.outputs.github_environment }}
+      operation: ${{ steps.operation.outputs.operation }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate allowed promotion path
+        run: |
+          python scripts/ci/validate_branch_flow.py \
+            "${{ github.base_ref }}" \
+            "${{ github.head_ref }}"
+
+      - name: Resolve target GitHub Environment
+        id: resolve
+        shell: bash
+        run: |
+          python scripts/ci/resolve_environment.py "${{ github.base_ref }}" >> "$GITHUB_OUTPUT"
+
+      - name: Choose Salesforce validation operation
+        id: operation
+        shell: bash
+        run: |
+          if [[ "${{ github.base_ref }}" == "main" ]]; then
+            echo "operation=validate-production" >> "$GITHUB_OUTPUT"
+          else
+            echo "operation=validate-lower" >> "$GITHUB_OUTPUT"
+          fi
+
+  salesforce-validation:
+    name: Salesforce target validation
+    needs: branch-policy
+    uses: ./.github/workflows/_salesforce-deploy.yml
+    with:
+      github_environment: ${{ needs.branch-policy.outputs.github_environment }}
+      from_ref: ${{ github.event.pull_request.base.sha }}
+      to_ref: ${{ github.event.pull_request.head.sha }}
+      operation: ${{ needs.branch-policy.outputs.operation }}
+      test_level: RunLocalTests
+    secrets: inherit
